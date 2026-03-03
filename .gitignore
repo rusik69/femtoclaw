@@ -1,0 +1,18 @@
+# Go build artifacts
+/bin/
+/dist/
+/out/
+/*.exe
+/*.test
+/*.prof
+/coverage.out
+/coverage.txt
+/work/
+
+# OS/IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Environment
+.env

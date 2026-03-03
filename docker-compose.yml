@@ -1,0 +1,10 @@
+services:
+  nanoclaw:
+    build: .
+    image: nanoclaw:local
+    working_dir: /work
+    volumes:
+      - ./work:/work
+    env_file:
+      - .env
+    restart: unless-stopped
