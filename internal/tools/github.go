@@ -79,3 +79,45 @@ func GithubCommentIssue(client *github.Client, owner, repo string, number int, b
 	}
 	return "Comment posted successfully", nil
 }
+
+// GithubWriteFile writes or updates a file in a repository (for GitHub Pages logging).
+func GithubWriteFile(client *github.Client, owner, repo, path, content, message, branch string) (string, error) {
+	if client == nil {
+		return "", fmt.Errorf("github client not initialized")
+	}
+	ctx := context.Background()
+
+	if branch == "" {
+		branch = "main"
+	}
+
+	// Try to get existing file to get its SHA (for updates)
+	fileContent, _, resp, err := client.Repositories.GetContents(ctx, owner, repo, path, &github.RepositoryContentGetOptions{Ref: branch})
+	if err != nil && !is404(err) {
+		return "", err
+	}
+
+	var sha string
+	if fileContent != nil {
+		sha = *fileContent.SHA
+	}
+
+	_, _, err = client.Repositories.CreateFile(ctx, owner, repo, path, &github.RepositoryContentFileOptions{
+		Message: &message,
+		Content: []byte(content),
+		Branch:  &branch,
+		SHA:     &sha,
+	})
+	if err != nil {
+		return "", err
+	}
+	_ = resp // silence unused variable warning
+	return fmt.Sprintf("File %s updated in %s/%s", path, owner, repo), nil
+}
+
+func is404(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "404")
+}

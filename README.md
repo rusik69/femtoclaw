@@ -18,7 +18,10 @@ It integrates with Telegram and OpenAI to provide a chat interface capable of ma
     ```bash
     export TELEGRAM_API_KEY="your-telegram-bot-token"
     export OPENAI_API_KEY="your-openai-api-key"
+    export OPENAI_BASE_URL="https://api.openai.com/v1" # Optional: custom OpenAI-compatible base URL (e.g., http://172.19.12.109:1234/v1 for LMCloud)
+    export OPENAI_MODEL="gpt-4-turbo-preview" # Optional: model name (e.g., qwen/qwen3-coder-next)
     export GITHUB_TOKEN="your-github-token"
+    export GITHUB_BASE_URL="" # Optional: GitHub Enterprise API URL (e.g., https://github.example.com/api/v3)
     export ALLOWED_USERS="user1,user2" # Optional: comma-separated list of allowed telegram usernames
     export WORKDIR="./work" # Optional: base directory for git/shell tools
     ```

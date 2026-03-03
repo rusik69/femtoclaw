@@ -8,11 +8,14 @@ import (
 
 // Config holds the simplified configuration for the bot
 type Config struct {
-	TelegramToken string
-	OpenAIToken   string
-	GitHubToken   string
-	AllowedUsers  []string
-	WorkDir       string
+	TelegramToken  string
+	OpenAIToken    string
+	GitHubToken    string
+	BaseURL        string
+	GitHubBaseURL  string
+	Model          string
+	AllowedUsers   []string
+	WorkDir        string
 }
 
 // LoadConfig loads the configuration from environment variables
@@ -27,8 +30,21 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("OPENAI_API_KEY environment variable is required")
 	}
 
+	baseURL := os.Getenv("OPENAI_BASE_URL")
+	if baseURL == "" {
+		baseURL = "https://api.openai.com/v1"
+	}
+
+	model := os.Getenv("OPENAI_MODEL")
+	if model == "" {
+		model = "gpt-4-turbo-preview"
+	}
+
 	githubToken := os.Getenv("GITHUB_TOKEN")
 	// GitHub token is optional for basic functionality but required for GitHub tools
+
+	githubBaseURL := os.Getenv("GITHUB_BASE_URL")
+	// GitHub Base URL for enterprise instances (e.g., https://github.example.com/api/v3)
 
 	allowedUsersStr := os.Getenv("ALLOWED_USERS")
 	var allowedUsers []string
@@ -45,10 +61,13 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return &Config{
-		TelegramToken: telegramToken,
-		OpenAIToken:   openaiToken,
-		GitHubToken:   githubToken,
-		AllowedUsers:  allowedUsers,
-		WorkDir:       workDir,
+		TelegramToken:  telegramToken,
+		OpenAIToken:    openaiToken,
+		GitHubToken:    githubToken,
+		BaseURL:        baseURL,
+		GitHubBaseURL:  githubBaseURL,
+		Model:          model,
+		AllowedUsers:   allowedUsers,
+		WorkDir:        workDir,
 	}, nil
 }

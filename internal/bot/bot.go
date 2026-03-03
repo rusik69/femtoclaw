@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -61,7 +62,11 @@ func NewBot(cfg *config.Config) (*Bot, error) {
 	bot.Debug = true
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
-	openaiClient := openai.NewClient(cfg.OpenAIToken)
+	config := openai.DefaultConfig(cfg.OpenAIToken)
+	if cfg.BaseURL != "" {
+		config.BaseURL = cfg.BaseURL
+	}
+	openaiClient := openai.NewClientWithConfig(config)
 
 	// Initialize GitHub client
 	var ghClient *github.Client
@@ -72,6 +77,9 @@ func NewBot(cfg *config.Config) (*Bot, error) {
 		)
 		tc := oauth2.NewClient(ctx, ts)
 		ghClient = github.NewClient(tc)
+		if cfg.GitHubBaseURL != "" {
+			ghClient.BaseURL, _ = url.Parse(cfg.GitHubBaseURL)
+		}
 	}
 
 	return &Bot{
@@ -92,7 +100,7 @@ func (b *Bot) Start() {
 	updates := b.api.GetUpdatesChan(u)
 
 	for update := range updates {
-		if update.Message == nil { // ignore any non-Message updates
+		if update.Message == nil || update.Message.From == nil { // ignore any non-Message updates
 			continue
 		}
 
@@ -415,6 +423,43 @@ var openAITools = []openai.Tool{
 			},
 		},
 	},
+	{
+		Type: openai.ToolTypeFunction,
+		Function: &openai.FunctionDefinition{
+			Name:        "github_write_file",
+			Description: "Write or update a file in a repository. Use for GitHub Pages logging.",
+			Parameters: jsonschema.Definition{
+				Type: jsonschema.Object,
+				Properties: map[string]jsonschema.Definition{
+					"owner": {
+						Type:        jsonschema.String,
+						Description: "The owner of the repository.",
+					},
+					"repo": {
+						Type:        jsonschema.String,
+						Description: "The name of the repository.",
+					},
+					"path": {
+						Type:        jsonschema.String,
+						Description: "The file path (e.g., 'logs/2024-01-15.md').",
+					},
+					"content": {
+						Type:        jsonschema.String,
+						Description: "The file content to write.",
+					},
+					"message": {
+						Type:        jsonschema.String,
+						Description: "The commit message.",
+					},
+					"branch": {
+						Type:        jsonschema.String,
+						Description: "The branch name (default: main).",
+					},
+				},
+				Required: []string{"owner", "repo", "path", "content", "message"},
+			},
+		},
+	},
 }
 
 // handleMessage processes a single message using OpenAI with tools
@@ -548,7 +593,7 @@ Be careful with shell commands.`, b.cfg.WorkDir)
 		resp, err := b.openaiClient.CreateChatCompletion(
 			ctx,
 			openai.ChatCompletionRequest{
-				Model:    openai.GPT4TurboPreview,
+				Model:    b.cfg.Model,
 				Messages: messages,
 				Tools:    openAITools,
 			},
@@ -557,6 +602,10 @@ Be careful with shell commands.`, b.cfg.WorkDir)
 		if err != nil {
 			log.Printf("ChatCompletion error: %v", err)
 			return "", err
+		}
+
+		if len(resp.Choices) == 0 {
+			return "No response choices returned", nil
 		}
 
 		choice := resp.Choices[0]
@@ -592,50 +641,154 @@ Be careful with shell commands.`, b.cfg.WorkDir)
 				}
 				switch toolCall.Function.Name {
 				case "list_files":
-					path, _ := args["path"].(string)
+					path, ok := args["path"].(string)
+					if !ok {
+						output = "Error: invalid path parameter"
+						break
+					}
 					output, err = tools.ListFiles(path, cwd)
 				case "read_file":
-					path, _ := args["path"].(string)
+					path, ok := args["path"].(string)
+					if !ok {
+						output = "Error: invalid path parameter"
+						break
+					}
 					output, err = tools.ReadFile(path, cwd)
 				case "write_file":
-					path, _ := args["path"].(string)
-					content, _ := args["content"].(string)
+					path, ok := args["path"].(string)
+					if !ok {
+						output = "Error: invalid path parameter"
+						break
+					}
+					content, ok := args["content"].(string)
+					if !ok {
+						output = "Error: invalid content parameter"
+						break
+					}
 					output, err = tools.WriteFile(path, content, cwd)
 				case "run_git_command":
-					cmdArgs, _ := args["args"].(string)
+					cmdArgs, ok := args["args"].(string)
+					if !ok {
+						output = "Error: invalid args parameter"
+						break
+					}
 					output, err = tools.RunGitCommand(cmdArgs, cwd)
 				case "run_shell_command":
-					cmd, _ := args["command"].(string)
+					cmd, ok := args["command"].(string)
+					if !ok {
+						output = "Error: invalid command parameter"
+						break
+					}
 					output, err = tools.RunShellCommand(cmd, cwd)
 				case "vibecode":
-					path, _ := args["path"].(string)
+					path, ok := args["path"].(string)
+					if !ok {
+						output = "Error: invalid path parameter"
+						break
+					}
 					output, err = tools.Vibecode(path, cwd)
 				case "github_search_issues":
-					query, _ := args["query"].(string)
+					query, ok := args["query"].(string)
+					if !ok {
+						output = "Error: invalid query parameter"
+						break
+					}
 					output, err = tools.GithubSearchIssues(b.githubClient, query)
 				case "github_fork_repo":
-					owner, _ := args["owner"].(string)
-					repo, _ := args["repo"].(string)
+					owner, ok := args["owner"].(string)
+					if !ok {
+						output = "Error: invalid owner parameter"
+						break
+					}
+					repo, ok := args["repo"].(string)
+					if !ok {
+						output = "Error: invalid repo parameter"
+						break
+					}
 					output, err = tools.GithubForkRepo(b.githubClient, owner, repo)
 				case "github_create_pr":
-					owner, _ := args["owner"].(string)
-					repo, _ := args["repo"].(string)
-					title, _ := args["title"].(string)
-					body, _ := args["body"].(string)
-					head, _ := args["head"].(string)
-					base, _ := args["base"].(string)
+					owner, ok := args["owner"].(string)
+					if !ok {
+						output = "Error: invalid owner parameter"
+						break
+					}
+					repo, ok := args["repo"].(string)
+					if !ok {
+						output = "Error: invalid repo parameter"
+						break
+					}
+					title, ok := args["title"].(string)
+					if !ok {
+						output = "Error: invalid title parameter"
+						break
+					}
+					body, ok := args["body"].(string)
+					if !ok {
+						output = "Error: invalid body parameter"
+						break
+					}
+					head, ok := args["head"].(string)
+					if !ok {
+						output = "Error: invalid head parameter"
+						break
+					}
+					base, ok := args["base"].(string)
+					if !ok {
+						output = "Error: invalid base parameter"
+						break
+					}
 					output, err = tools.GithubCreatePR(b.githubClient, owner, repo, title, body, head, base)
 				case "github_comment_issue":
-					owner, _ := args["owner"].(string)
-					repo, _ := args["repo"].(string)
+					owner, ok := args["owner"].(string)
+					if !ok {
+						output = "Error: invalid owner parameter"
+						break
+					}
+					repo, ok := args["repo"].(string)
+					if !ok {
+						output = "Error: invalid repo parameter"
+						break
+					}
 					// Handle number as float64 because JSON
 					numFloat, ok := args["issue_number"].(float64)
-					if ok {
-						body, _ := args["body"].(string)
-						output, err = tools.GithubCommentIssue(b.githubClient, owner, repo, int(numFloat), body)
-					} else {
+					if !ok {
 						output = "Error: invalid issue_number"
+						break
 					}
+					body, ok := args["body"].(string)
+					if !ok {
+						output = "Error: invalid body parameter"
+						break
+					}
+					output, err = tools.GithubCommentIssue(b.githubClient, owner, repo, int(numFloat), body)
+				case "github_write_file":
+					owner, ok := args["owner"].(string)
+					if !ok {
+						output = "Error: invalid owner parameter"
+						break
+					}
+					repo, ok := args["repo"].(string)
+					if !ok {
+						output = "Error: invalid repo parameter"
+						break
+					}
+					path, ok := args["path"].(string)
+					if !ok {
+						output = "Error: invalid path parameter"
+						break
+					}
+					content, ok := args["content"].(string)
+					if !ok {
+						output = "Error: invalid content parameter"
+						break
+					}
+					message, ok := args["message"].(string)
+					if !ok {
+						output = "Error: invalid message parameter"
+						break
+					}
+					branch, _ := args["branch"].(string)
+					output, err = tools.GithubWriteFile(b.githubClient, owner, repo, path, content, message, branch)
 				default:
 					output = "Unknown tool"
 				}
