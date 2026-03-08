@@ -3,14 +3,24 @@ package tools
 import (
 	"context"
 	"fmt"
+	"log"
+	"math/rand"
 	"strings"
 	"time"
 
 	"github.com/google/go-github/v69/github"
 )
 
+// githubSleep sleeps 60–600 seconds randomly before GitHub API calls to avoid rate limiting.
+func githubSleep() {
+	d := time.Duration(60+rand.Intn(541)) * time.Second
+	log.Printf("[github] sleeping %v before API call", d)
+	time.Sleep(d)
+}
+
 // GithubSearchIssues searches for GitHub issues.
 func GithubSearchIssues(client *github.Client, query string) (string, error) {
+	githubSleep()
 	if client == nil {
 		return "", fmt.Errorf("github client not initialized")
 	}
@@ -49,6 +59,7 @@ func GithubForkRepo(client *github.Client, owner, repo, forkURL, githubUser stri
 		cloneURL := url + ".git"
 		return fmt.Sprintf("Using fork: %s (Clone URL: %s)", url, cloneURL), nil
 	}
+	githubSleep()
 	if githubUser != "" {
 		url := fmt.Sprintf("https://github.com/%s/%s", githubUser, repo)
 		cloneURL := url + ".git"
@@ -79,6 +90,7 @@ func GithubForkRepo(client *github.Client, owner, repo, forkURL, githubUser stri
 
 // GithubCreatePR creates a PR on GitHub, retrying up to 3 times on transient failures.
 func GithubCreatePR(client *github.Client, owner, repo, title, body, head, base string) (string, error) {
+	githubSleep()
 	if client == nil {
 		return "", fmt.Errorf("github client not initialized")
 	}
@@ -103,8 +115,24 @@ func GithubCreatePR(client *github.Client, owner, repo, title, body, head, base 
 	return "", fmt.Errorf("PR creation failed after 5 attempts: %w", lastErr)
 }
 
+// GithubListPRComments lists comments on a PR (issue) since the given time.
+func GithubListPRComments(client *github.Client, owner, repo string, number int, since time.Time) ([]*github.IssueComment, error) {
+	githubSleep()
+	if client == nil {
+		return nil, fmt.Errorf("github client not initialized")
+	}
+	ctx := context.Background()
+	opts := &github.IssueListCommentsOptions{Since: &since}
+	comments, _, err := client.Issues.ListComments(ctx, owner, repo, number, opts)
+	if err != nil {
+		return nil, err
+	}
+	return comments, nil
+}
+
 // GithubCommentIssue comments on a GitHub issue or PR.
 func GithubCommentIssue(client *github.Client, owner, repo string, number int, body string) (string, error) {
+	githubSleep()
 	if client == nil {
 		return "", fmt.Errorf("github client not initialized")
 	}
@@ -119,6 +147,7 @@ func GithubCommentIssue(client *github.Client, owner, repo string, number int, b
 
 // GithubWriteFile writes or updates a file in a repository (for GitHub Pages logging).
 func GithubWriteFile(client *github.Client, owner, repo, path, content, message, branch string) (string, error) {
+	githubSleep()
 	if client == nil {
 		return "", fmt.Errorf("github client not initialized")
 	}

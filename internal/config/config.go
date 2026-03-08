@@ -3,19 +3,24 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Config holds the simplified configuration for the bot
 type Config struct {
-	TelegramToken string
-	OpenAIToken   string
-	GitHubToken   string
-	GitHubUser    string
-	BaseURL       string
-	Model         string
-	AllowedUsers  []string
-	WorkDir       string
+	TelegramToken   string
+	OpenAIToken     string
+	GitHubToken     string
+	GitHubUser      string
+	BaseURL         string
+	Model           string
+	AllowedUsers    []string
+	WorkDir         string
+	PRPollInterval  time.Duration
+	DBPath          string
 }
 
 // LoadConfig loads the configuration from environment variables
@@ -57,14 +62,30 @@ func LoadConfig() (*Config, error) {
 		workDir = "."
 	}
 
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = filepath.Join(workDir, "femtoclaw.db")
+	}
+
+	prPollInterval := 60 * time.Second
+	if s := os.Getenv("PR_POLL_INTERVAL"); s != "" {
+		if sec, err := strconv.Atoi(s); err == nil && sec > 0 {
+			prPollInterval = time.Duration(sec) * time.Second
+		} else if d, err := time.ParseDuration(s); err == nil && d > 0 {
+			prPollInterval = d
+		}
+	}
+
 	return &Config{
-		TelegramToken: telegramToken,
-		OpenAIToken:   openaiToken,
-		GitHubToken:   githubToken,
-		GitHubUser:    githubUser,
-		BaseURL:       baseURL,
-		Model:         model,
-		AllowedUsers:  allowedUsers,
-		WorkDir:       workDir,
+		TelegramToken:  telegramToken,
+		OpenAIToken:    openaiToken,
+		GitHubToken:    githubToken,
+		GitHubUser:     githubUser,
+		BaseURL:        baseURL,
+		Model:          model,
+		AllowedUsers:   allowedUsers,
+		WorkDir:        workDir,
+		PRPollInterval: prPollInterval,
+		DBPath:         dbPath,
 	}, nil
 }

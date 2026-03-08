@@ -46,6 +46,8 @@ Optional env vars for container (add to `.env`):
 
 - `GIT_USER_NAME` — git commit author name (default: FemtoClaw Bot)
 - `GIT_USER_EMAIL` — git commit author email (default: femtoclaw@bot.local)
+- `PR_POLL_INTERVAL` — seconds between PR comment polls (default: 60)
+- `DB_PATH` — path to SQLite database for tracked PRs (default: `$WORKDIR/femtoclaw.db`). Persists across redeploys when `./work` is mounted.
 
 ## Features
 
@@ -53,15 +55,16 @@ Optional env vars for container (add to `.env`):
 -   **Local File Management**: List, read, write files.
 -   **Git/Shell Integration**: Clone repos, run tests, build projects.
 -   **GitHub Integration**:
-    -   **Find Issues**: Search for "good first issue" or any other criteria.
+    -   **Find Issues**: Search for issues by label, language, or any criteria.
     -   **Fork Repos**: Fork interesting projects directly.
     -   **Solve & PR**: Autonomous workflow to clone, fix, push, and create a Pull Request.
     -   **Comment**: Interact with issues and PRs.
+    -   **PR comment watcher**: Automatically replies to comments on PRs created by FemtoClaw (requires `GITHUB_USER`). Tracked PRs are persisted in SQLite under `$WORKDIR` so they survive redeploys.
 -   **Vibecode**: Analyze project structure and content.
 
 ## Usage Examples
 
-- "Find open issues labeled 'good first issue' in golang"
+- "Find open issues in golang" or "Find bug issues in python"
 - "Fork github.com/some/repo"
 - "Clone the repo and run tests"
 - "Fix the bug in main.go where..."

@@ -28,6 +28,8 @@ RUN apk add --no-cache \
 	rust \
 	cargo
 
+RUN npm install -g nx
+
 WORKDIR /work
 
 COPY --from=build /out/femtoclaw /usr/local/bin/femtoclaw
