@@ -1,7 +1,9 @@
 services:
-  nanoclaw:
-    build: .
-    image: nanoclaw:local
+  femtoclaw:
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: femtoclaw:local
     working_dir: /work
     volumes:
       - ./work:/work

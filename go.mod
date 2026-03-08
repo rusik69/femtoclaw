@@ -1,4 +1,4 @@
-module github.com/rusik69/nanoclaw
+module github.com/rusik69/femtoclaw
 
 go 1.25.5
 

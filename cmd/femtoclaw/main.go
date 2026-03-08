@@ -3,8 +3,8 @@ package main
 import (
 	"log"
 
-	"github.com/rusik69/nanoclaw/internal/bot"
-	"github.com/rusik69/nanoclaw/internal/config"
+	"github.com/rusik69/femtoclaw/internal/bot"
+	"github.com/rusik69/femtoclaw/internal/config"
 )
 
 func main() {

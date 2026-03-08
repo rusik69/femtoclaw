@@ -1,6 +1,6 @@
-# NanoClaw
+# FemtoClaw
 
-NanoClaw is a minimalistic AI assistant service, inspired by OpenClaw, written in Go.
+FemtoClaw is a minimalistic AI assistant service, inspired by OpenClaw, written in Go.
 It integrates with Telegram and OpenAI to provide a chat interface capable of managing local files, git repositories, and interacting with GitHub.
 
 ## Prerequisites
@@ -21,7 +21,7 @@ It integrates with Telegram and OpenAI to provide a chat interface capable of ma
     export OPENAI_BASE_URL="https://api.openai.com/v1" # Optional: custom OpenAI-compatible base URL (e.g., http://172.19.12.109:1234/v1 for LMCloud)
     export OPENAI_MODEL="gpt-4-turbo-preview" # Optional: model name (e.g., qwen/qwen3-coder-next)
     export GITHUB_TOKEN="your-github-token"
-    export GITHUB_BASE_URL="" # Optional: GitHub Enterprise API URL (e.g., https://github.example.com/api/v3)
+    export GITHUB_USER="your-github-username" # Optional: used as fork base and PR head
     export ALLOWED_USERS="user1,user2" # Optional: comma-separated list of allowed telegram usernames
     export WORKDIR="./work" # Optional: base directory for git/shell tools
     ```
@@ -32,13 +32,20 @@ It integrates with Telegram and OpenAI to provide a chat interface capable of ma
     go run main.go
     ```
 
-## Docker Compose
+## Podman Compose
 
 The container runs in `/work` and mounts `./work` from the host. Set `WORKDIR` if you want a different base path.
 
+The image includes npm, python3, make, gcc, and git. Git identity is configured at startup from `GIT_USER_NAME` and `GIT_USER_EMAIL` (defaults: "FemtoClaw Bot", "femtoclaw@bot.local"). `GITHUB_TOKEN` is used for git push auth.
+
 ```bash
-docker compose up -d --build
+podman compose up -d --build
 ```
+
+Optional env vars for container (add to `.env`):
+
+- `GIT_USER_NAME` — git commit author name (default: FemtoClaw Bot)
+- `GIT_USER_EMAIL` — git commit author email (default: femtoclaw@bot.local)
 
 ## Features
 

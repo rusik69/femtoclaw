@@ -11,7 +11,7 @@ import (
 // to verify the tool logic works against the actual OS.
 func TestFileOperationsE2E(t *testing.T) {
 	// 1. Setup a temporary directory for the test
-	tempDir, err := os.MkdirTemp("", "nanoclaw-e2e")
+	tempDir, err := os.MkdirTemp("", "femtoclaw-e2e")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestFileOperationsE2E(t *testing.T) {
 
 // TestVibecodeE2E prepares a project structure and runs vibecode on it
 func TestVibecodeE2E(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "nanoclaw-vibe-e2e")
+	tempDir, err := os.MkdirTemp("", "femtoclaw-vibe-e2e")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}

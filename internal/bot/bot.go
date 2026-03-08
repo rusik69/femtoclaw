@@ -5,15 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/google/go-github/v69/github"
-	"github.com/rusik69/nanoclaw/internal/config"
-	"github.com/rusik69/nanoclaw/internal/tools"
+	"github.com/rusik69/femtoclaw/internal/config"
+	"github.com/rusik69/femtoclaw/internal/tools"
 	openai "github.com/sashabaranov/go-openai"
 	"github.com/sashabaranov/go-openai/jsonschema"
 	"golang.org/x/oauth2"
@@ -77,9 +76,6 @@ func NewBot(cfg *config.Config) (*Bot, error) {
 		)
 		tc := oauth2.NewClient(ctx, ts)
 		ghClient = github.NewClient(tc)
-		if cfg.GitHubBaseURL != "" {
-			ghClient.BaseURL, _ = url.Parse(cfg.GitHubBaseURL)
-		}
 	}
 
 	return &Bot{
@@ -177,16 +173,74 @@ func (b *Bot) getHistory(chatID int64) []openai.ChatCompletionMessage {
 		return nil
 	}
 
-	return append([]openai.ChatCompletionMessage(nil), history...)
+	return fixToolCallSequences(append([]openai.ChatCompletionMessage(nil), history...))
 }
 
-func (b *Bot) appendHistory(chatID int64, msg openai.ChatCompletionMessage) {
+// sanitizeMessages ensures no message has empty Content, which some APIs reject as null.
+func sanitizeMessages(msgs []openai.ChatCompletionMessage) []openai.ChatCompletionMessage {
+	out := make([]openai.ChatCompletionMessage, len(msgs))
+	for i, m := range msgs {
+		out[i] = m
+		if m.Content == "" && len(m.MultiContent) == 0 {
+			out[i].Content = " "
+		}
+	}
+	return out
+}
+
+// fixToolCallSequences rebuilds the message list keeping only valid sequences.
+// An assistant message with tool_calls is kept only when every one of its
+// tool_call IDs has a matching tool response immediately following it.
+// Only tool responses whose ToolCallID belongs to the assistant are included;
+// stray tool messages with unrecognised IDs are dropped.
+func fixToolCallSequences(msgs []openai.ChatCompletionMessage) []openai.ChatCompletionMessage {
+	var out []openai.ChatCompletionMessage
+	i := 0
+	for i < len(msgs) {
+		m := msgs[i]
+		if m.Role == openai.ChatMessageRoleAssistant && len(m.ToolCalls) > 0 {
+			expected := make(map[string]bool, len(m.ToolCalls))
+			for _, tc := range m.ToolCalls {
+				expected[tc.ID] = true
+			}
+			j := i + 1
+			var matched []openai.ChatCompletionMessage
+			for j < len(msgs) && msgs[j].Role == openai.ChatMessageRoleTool {
+				if expected[msgs[j].ToolCallID] {
+					matched = append(matched, msgs[j])
+					delete(expected, msgs[j].ToolCallID)
+				}
+				j++
+			}
+			if len(expected) == 0 {
+				out = append(out, m)
+				out = append(out, matched...)
+			}
+			i = j
+		} else if m.Role == openai.ChatMessageRoleTool {
+			i++
+		} else {
+			out = append(out, m)
+			i++
+		}
+	}
+	return out
+}
+
+// appendHistoryBatch appends multiple messages atomically so that an assistant
+// message with tool_calls and all its tool responses are never interleaved with
+// messages from concurrently-running tasks.
+func (b *Bot) appendHistoryBatch(chatID int64, msgs ...openai.ChatCompletionMessage) {
+	if len(msgs) == 0 {
+		return
+	}
 	b.historyMu.Lock()
 	defer b.historyMu.Unlock()
 
-	b.history[chatID] = append(b.history[chatID], msg)
+	b.history[chatID] = append(b.history[chatID], msgs...)
 	if len(b.history[chatID]) > maxHistoryMessages {
-		b.history[chatID] = b.history[chatID][len(b.history[chatID])-maxHistoryMessages:]
+		trimmed := b.history[chatID][len(b.history[chatID])-maxHistoryMessages:]
+		b.history[chatID] = fixToolCallSequences(trimmed)
 	}
 }
 
@@ -323,40 +377,44 @@ var openAITools = []openai.Tool{
 		Type: openai.ToolTypeFunction,
 		Function: &openai.FunctionDefinition{
 			Name:        "github_search_issues",
-			Description: "Search for GitHub issues.",
+			Description: "Search for GitHub issues. Always include '-linked:pr' in the query to exclude issues that already have a pull request.",
 			Parameters: jsonschema.Definition{
 				Type: jsonschema.Object,
 				Properties: map[string]jsonschema.Definition{
 					"query": {
 						Type:        jsonschema.String,
-						Description: "The search query (e.g., 'is:issue is:open label:\"good first issue\" language:go').",
+						Description: "The search query. Must include '-linked:pr' to skip issues with existing PRs (e.g., 'is:issue is:open -linked:pr label:\"good first issue\" language:go').",
 					},
 				},
 				Required: []string{"query"},
 			},
 		},
 	},
-	{
-		Type: openai.ToolTypeFunction,
-		Function: &openai.FunctionDefinition{
+		{
+			Type: openai.ToolTypeFunction,
+			Function: &openai.FunctionDefinition{
 			Name:        "github_fork_repo",
-			Description: "Fork a GitHub repository.",
-			Parameters: jsonschema.Definition{
-				Type: jsonschema.Object,
-				Properties: map[string]jsonschema.Definition{
-					"owner": {
-						Type:        jsonschema.String,
-						Description: "The owner of the repository to fork.",
+			Description: "Fork a GitHub repository. Returns the fork URL and clone URL — use the clone URL to clone the fork. Always call this BEFORE cloning when you intend to submit a PR.",
+				Parameters: jsonschema.Definition{
+					Type: jsonschema.Object,
+					Properties: map[string]jsonschema.Definition{
+						"owner": {
+							Type:        jsonschema.String,
+							Description: "The owner of the repository to fork.",
+						},
+						"repo": {
+							Type:        jsonschema.String,
+							Description: "The name of the repository to fork.",
+						},
+						"fork_url": {
+							Type:        jsonschema.String,
+							Description: "Optional: URL of an existing fork (e.g. https://github.com/USER/repo) when API fork failed and user forked manually.",
+						},
 					},
-					"repo": {
-						Type:        jsonschema.String,
-						Description: "The name of the repository to fork.",
-					},
+					Required: []string{"owner", "repo"},
 				},
-				Required: []string{"owner", "repo"},
 			},
 		},
-	},
 	{
 		Type: openai.ToolTypeFunction,
 		Function: &openai.FunctionDefinition{
@@ -545,29 +603,32 @@ func (b *Bot) processMessage(msg *tgbotapi.Message) (string, error) {
 	ctx := context.Background()
 	chatID := msg.Chat.ID
 
-	systemPrompt := fmt.Sprintf(`You are NanoClaw, an autonomous AI coding assistant.
+	githubUserInfo := ""
+	if b.cfg.GitHubUser != "" {
+		githubUserInfo = fmt.Sprintf("\nYour GitHub username is %s. When forking, push to your fork (https://github.com/%s/REPO) and use '%s:BRANCH' as the head in PRs.", b.cfg.GitHubUser, b.cfg.GitHubUser, b.cfg.GitHubUser)
+	}
+	systemPrompt := fmt.Sprintf(`You are FemtoClaw, an autonomous AI coding assistant.
 	Act as a task agent: keep a short plan, execute tools, and report results back concisely.
 	Maintain context across the conversation and use prior tool outputs and decisions.
 
-You can:
-1. Search GitHub issues.
-2. Fork repositories.
-3. Fix bugs by:
-   - cloning the repo (run_git_command "clone ...")
-   - analyzing code (vibecode, read_file)
-   - running tests (run_shell_command "go test", "npm test", etc.)
-   - creating a new branch (run_git_command "checkout -b fix-branch")
-   - editing files (write_file)
-   - committing and pushing changes (run_git_command "add .", "commit...", "push origin fix-branch")
-4. Create Pull Requests back to the upstream repo.
-5. Comment on PRs/Issues.
+The REQUIRED workflow for fixing any issue is, in this exact order:
+1. github_search_issues — find an open issue with no linked PR (-linked:pr).
+2. github_fork_repo — fork the repo; note the clone URL in the result.
+3. run_git_command "clone <fork_clone_url>" — clone the FORK, never the upstream.
+4. run_git_command "checkout -b fix-<issue>" — create a branch.
+5. Analyze and fix the code (vibecode, read_file, write_file).
+6. run_git_command "add ." then "commit -m ..." then "push origin fix-<issue>" — commit and push to the fork.
+7. github_create_pr — open a PR from <your_fork_user>:fix-<issue> against the upstream default branch. This step is MANDATORY — never end a task without creating the PR.
+8. Report the PR URL.
 
-When solving an issue, always clone the repo first to a temporary directory if possible or just current dir if empty/allowed.
-If the user asks for a full fix + PR, execute the full workflow and report each step with the resulting URLs.
-Always provide a brief plan before acting and a concise final report with key outputs/URLs when done.
-When running git or shell tools in a cloned repo, pass the repo path via the "cwd" argument.
-Default working directory: %s.
-Be careful with shell commands.`, b.cfg.WorkDir)
+Rules:
+- Never clone the upstream repo; always clone your fork.
+- Never skip step 7 (github_create_pr). If push succeeds, PR creation must follow immediately.
+- When searching for issues, always include "-linked:pr" in the query.
+- Pass the repo path via "cwd" for all git/shell commands inside the clone.
+- Always provide a brief plan before acting and a concise final report with the PR URL when done.
+Default working directory: %s.%s
+Be careful with shell commands.`, b.cfg.WorkDir, githubUserInfo)
 
 	// 1. Prepare conversation history with system prompt that guides the behavior
 	messages := []openai.ChatCompletionMessage{
@@ -580,12 +641,25 @@ Be careful with shell commands.`, b.cfg.WorkDir)
 	history := b.getHistory(chatID)
 	messages = append(messages, history...)
 
+	// Inject a reminder about the GitHub username right before the user message
+	// so it's always in recent context regardless of history length.
+	if b.cfg.GitHubUser != "" {
+		messages = append(messages, openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleSystem,
+			Content: fmt.Sprintf("Reminder: your GitHub username is %s. Always push to https://github.com/%s/REPO and use '%s:BRANCH' as the head in PRs.", b.cfg.GitHubUser, b.cfg.GitHubUser, b.cfg.GitHubUser),
+		})
+	}
+
+	userContent := msg.Text
+	if userContent == "" {
+		userContent = " "
+	}
 	userMessage := openai.ChatCompletionMessage{
 		Role:    openai.ChatMessageRoleUser,
-		Content: msg.Text,
+		Content: userContent,
 	}
 	messages = append(messages, userMessage)
-	b.appendHistory(chatID, userMessage)
+	b.appendHistoryBatch(chatID, userMessage)
 
 	// Loop to handle tool calls
 	var finalReply string
@@ -594,7 +668,7 @@ Be careful with shell commands.`, b.cfg.WorkDir)
 			ctx,
 			openai.ChatCompletionRequest{
 				Model:    b.cfg.Model,
-				Messages: messages,
+				Messages: sanitizeMessages(fixToolCallSequences(messages)),
 				Tools:    openAITools,
 			},
 		)
@@ -612,19 +686,20 @@ Be careful with shell commands.`, b.cfg.WorkDir)
 		msgContent := choice.Message
 
 		messages = append(messages, msgContent)
-		b.appendHistory(chatID, msgContent)
 
 		// If simple content, send it
 		if msgContent.Content != "" {
 			finalReply = msgContent.Content
 		}
 
-		// If no tool calls, we are done
+		// If no tool calls, write the assistant message to history and stop.
 		if len(msgContent.ToolCalls) == 0 {
+			b.appendHistoryBatch(chatID, msgContent)
 			break
 		}
 
-		// Handle tool calls
+		// Handle tool calls — collect all responses, then write the entire group atomically.
+		batchMsgs := []openai.ChatCompletionMessage{msgContent}
 		for _, toolCall := range msgContent.ToolCalls {
 			var output string
 			var err error
@@ -687,13 +762,16 @@ Be careful with shell commands.`, b.cfg.WorkDir)
 						break
 					}
 					output, err = tools.Vibecode(path, cwd)
-				case "github_search_issues":
-					query, ok := args["query"].(string)
-					if !ok {
-						output = "Error: invalid query parameter"
-						break
-					}
-					output, err = tools.GithubSearchIssues(b.githubClient, query)
+			case "github_search_issues":
+				query, ok := args["query"].(string)
+				if !ok {
+					output = "Error: invalid query parameter"
+					break
+				}
+				if !strings.Contains(query, "-linked:pr") {
+					query += " -linked:pr"
+				}
+				output, err = tools.GithubSearchIssues(b.githubClient, query)
 				case "github_fork_repo":
 					owner, ok := args["owner"].(string)
 					if !ok {
@@ -705,7 +783,8 @@ Be careful with shell commands.`, b.cfg.WorkDir)
 						output = "Error: invalid repo parameter"
 						break
 					}
-					output, err = tools.GithubForkRepo(b.githubClient, owner, repo)
+					forkURL, _ := args["fork_url"].(string)
+					output, err = tools.GithubForkRepo(b.githubClient, owner, repo, forkURL, b.cfg.GitHubUser)
 				case "github_create_pr":
 					owner, ok := args["owner"].(string)
 					if !ok {
@@ -798,15 +877,17 @@ Be careful with shell commands.`, b.cfg.WorkDir)
 				output = fmt.Sprintf("Error: %v", err)
 			}
 
-			// Append tool response
+			// Collect tool response
 			toolMessage := openai.ChatCompletionMessage{
 				Role:       openai.ChatMessageRoleTool,
 				Content:    output,
 				ToolCallID: toolCall.ID,
 			}
 			messages = append(messages, toolMessage)
-			b.appendHistory(chatID, toolMessage)
+			batchMsgs = append(batchMsgs, toolMessage)
 		}
+		// Write assistant + all tool responses as one atomic batch.
+		b.appendHistoryBatch(chatID, batchMsgs...)
 	}
 
 	return finalReply, nil

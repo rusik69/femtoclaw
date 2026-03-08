@@ -1,8 +1,8 @@
-APP_NAME := nanoclaw
-CMD_DIR := ./cmd/nanoclaw
+APP_NAME := femtoclaw
+CMD_DIR := ./cmd/femtoclaw
 BIN_DIR := ./bin
 
-.PHONY: build test lint run docker-up docker-down
+.PHONY: build test lint run podman-up podman-down
 
 build:
 	go build -o $(BIN_DIR)/$(APP_NAME) $(CMD_DIR)
@@ -16,8 +16,8 @@ lint:
 run:
 	set -a; [ -f .env ] && . .env; set +a; go run $(CMD_DIR)
 
-docker-up:
-	docker compose up -d --build
+podman-up:
+	podman compose up -d --build
 
-docker-down:
-	docker compose down
+podman-down:
+	podman compose down

@@ -8,14 +8,14 @@ import (
 
 // Config holds the simplified configuration for the bot
 type Config struct {
-	TelegramToken  string
-	OpenAIToken    string
-	GitHubToken    string
-	BaseURL        string
-	GitHubBaseURL  string
-	Model          string
-	AllowedUsers   []string
-	WorkDir        string
+	TelegramToken string
+	OpenAIToken   string
+	GitHubToken   string
+	GitHubUser    string
+	BaseURL       string
+	Model         string
+	AllowedUsers  []string
+	WorkDir       string
 }
 
 // LoadConfig loads the configuration from environment variables
@@ -41,10 +41,7 @@ func LoadConfig() (*Config, error) {
 	}
 
 	githubToken := os.Getenv("GITHUB_TOKEN")
-	// GitHub token is optional for basic functionality but required for GitHub tools
-
-	githubBaseURL := os.Getenv("GITHUB_BASE_URL")
-	// GitHub Base URL for enterprise instances (e.g., https://github.example.com/api/v3)
+	githubUser := os.Getenv("GITHUB_USER")
 
 	allowedUsersStr := os.Getenv("ALLOWED_USERS")
 	var allowedUsers []string
@@ -61,13 +58,13 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return &Config{
-		TelegramToken:  telegramToken,
-		OpenAIToken:    openaiToken,
-		GitHubToken:    githubToken,
-		BaseURL:        baseURL,
-		GitHubBaseURL:  githubBaseURL,
-		Model:          model,
-		AllowedUsers:   allowedUsers,
-		WorkDir:        workDir,
+		TelegramToken: telegramToken,
+		OpenAIToken:   openaiToken,
+		GitHubToken:   githubToken,
+		GitHubUser:    githubUser,
+		BaseURL:       baseURL,
+		Model:         model,
+		AllowedUsers:  allowedUsers,
+		WorkDir:       workDir,
 	}, nil
 }
