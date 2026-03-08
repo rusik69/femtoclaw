@@ -2,7 +2,7 @@ APP_NAME := femtoclaw
 CMD_DIR := ./cmd/femtoclaw
 BIN_DIR := ./bin
 
-.PHONY: build test lint run podman-up podman-down
+.PHONY: build test lint run podman-up podman-down logs
 
 build:
 	go build -o $(BIN_DIR)/$(APP_NAME) $(CMD_DIR)
@@ -21,3 +21,6 @@ podman-up:
 
 podman-down:
 	podman compose down
+
+logs:
+	podman compose logs -f

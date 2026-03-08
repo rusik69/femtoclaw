@@ -77,7 +77,7 @@ func GithubForkRepo(client *github.Client, owner, repo, forkURL, githubUser stri
 	return fmt.Sprintf("Fork created: %s (Clone URL: %s)", *repoObj.HTMLURL, *repoObj.CloneURL), nil
 }
 
-// GithubCreatePR creates a PR on GitHub.
+// GithubCreatePR creates a PR on GitHub, retrying up to 3 times on transient failures.
 func GithubCreatePR(client *github.Client, owner, repo, title, body, head, base string) (string, error) {
 	if client == nil {
 		return "", fmt.Errorf("github client not initialized")
@@ -89,11 +89,18 @@ func GithubCreatePR(client *github.Client, owner, repo, title, body, head, base 
 		Head:  &head,
 		Base:  &base,
 	}
-	pr, _, err := client.PullRequests.Create(ctx, owner, repo, newPR)
-	if err != nil {
-		return "", err
+	var lastErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		pr, _, err := client.PullRequests.Create(ctx, owner, repo, newPR)
+		if err == nil {
+			return fmt.Sprintf("PR created: %s", *pr.HTMLURL), nil
+		}
+		lastErr = err
+		if attempt < 4 {
+			time.Sleep(time.Duration(10*(attempt+1)) * time.Second)
+		}
 	}
-	return fmt.Sprintf("PR created: %s", *pr.HTMLURL), nil
+	return "", fmt.Errorf("PR creation failed after 5 attempts: %w", lastErr)
 }
 
 // GithubCommentIssue comments on a GitHub issue or PR.

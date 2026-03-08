@@ -164,6 +164,12 @@ func (b *Bot) getTask(taskID string) (*Task, bool) {
 	return &copy, true
 }
 
+func (b *Bot) clearHistory(chatID int64) {
+	b.historyMu.Lock()
+	defer b.historyMu.Unlock()
+	delete(b.history, chatID)
+}
+
 func (b *Bot) getHistory(chatID int64) []openai.ChatCompletionMessage {
 	b.historyMu.Lock()
 	defer b.historyMu.Unlock()
@@ -419,7 +425,7 @@ var openAITools = []openai.Tool{
 		Type: openai.ToolTypeFunction,
 		Function: &openai.FunctionDefinition{
 			Name:        "github_create_pr",
-			Description: "Create a Pull Request.",
+			Description: "Create a Pull Request. Always include 'Fixes #N' or 'Closes #N' in the body to link the issue.",
 			Parameters: jsonschema.Definition{
 				Type: jsonschema.Object,
 				Properties: map[string]jsonschema.Definition{
@@ -433,11 +439,11 @@ var openAITools = []openai.Tool{
 					},
 					"title": {
 						Type:        jsonschema.String,
-						Description: "The title of the PR.",
+						Description: "The title of the PR. Include the issue number, e.g. 'Fix list type resolution (#42)'.",
 					},
 					"body": {
 						Type:        jsonschema.String,
-						Description: "The body of the PR.",
+						Description: "The body of the PR. MUST contain 'Fixes #N' (or 'Closes #N') where N is the issue number, so GitHub auto-links and auto-closes the issue when merged.",
 					},
 					"head": {
 						Type:        jsonschema.String,
@@ -618,8 +624,8 @@ The REQUIRED workflow for fixing any issue is, in this exact order:
 4. run_git_command "checkout -b fix-<issue>" — create a branch.
 5. Analyze and fix the code (vibecode, read_file, write_file).
 6. run_git_command "add ." then "commit -m ..." then "push origin fix-<issue>" — commit and push to the fork.
-7. github_create_pr — open a PR from <your_fork_user>:fix-<issue> against the upstream default branch. This step is MANDATORY — never end a task without creating the PR.
-8. Report the PR URL.
+7. github_create_pr — open a PR from <your_fork_user>:fix-<issue> against the upstream default branch. The PR body MUST include "Fixes #N" (where N is the issue number) to auto-link and auto-close the issue. This step is MANDATORY — never end a task without creating the PR.
+8. Report the PR URL and the linked issue number.
 
 Rules:
 - Never clone the upstream repo; always clone your fork.
@@ -663,18 +669,34 @@ Be careful with shell commands.`, b.cfg.WorkDir, githubUserInfo)
 
 	// Loop to handle tool calls
 	var finalReply string
+	retried := false
 	for {
+		cleaned := sanitizeMessages(fixToolCallSequences(messages))
 		resp, err := b.openaiClient.CreateChatCompletion(
 			ctx,
 			openai.ChatCompletionRequest{
 				Model:    b.cfg.Model,
-				Messages: sanitizeMessages(fixToolCallSequences(messages)),
+				Messages: cleaned,
 				Tools:    openAITools,
 			},
 		)
 
 		if err != nil {
-			log.Printf("ChatCompletion error: %v", err)
+			roles := make([]string, len(cleaned))
+			for i, m := range cleaned {
+				roles[i] = m.Role
+			}
+			log.Printf("ChatCompletion error (chatID=%d, msgs=%d, roles=%v): %v", chatID, len(cleaned), roles, err)
+			if !retried && strings.Contains(err.Error(), "role 'tool'") {
+				log.Printf("Clearing history and retrying with fresh context")
+				retried = true
+				b.clearHistory(chatID)
+				messages = []openai.ChatCompletionMessage{
+					{Role: openai.ChatMessageRoleSystem, Content: systemPrompt},
+					userMessage,
+				}
+				continue
+			}
 			return "", err
 		}
 
