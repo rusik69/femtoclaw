@@ -11,9 +11,9 @@ import (
 	"github.com/google/go-github/v69/github"
 )
 
-// githubSleep sleeps 60–600 seconds randomly before GitHub API calls to avoid rate limiting.
+// githubSleep sleeps 10–60 seconds randomly before GitHub API calls to avoid rate limiting.
 func githubSleep() {
-	d := time.Duration(60+rand.Intn(541)) * time.Second
+	d := time.Duration(10+rand.Intn(51)) * time.Second
 	log.Printf("[github] sleeping %v before API call", d)
 	time.Sleep(d)
 }

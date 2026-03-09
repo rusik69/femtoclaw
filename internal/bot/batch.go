@@ -2,9 +2,11 @@ package bot
 
 import (
 	"fmt"
+	"log"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -74,6 +76,10 @@ func (b *Bot) handleBatchWork(msg *tgbotapi.Message, count int) {
 	}
 
 	for i := 1; count == 0 || i <= count; i++ {
+		if i > 1 {
+			log.Printf("[batch] sleeping 10m between tasks")
+			time.Sleep(10 * time.Minute)
+		}
 		if stopCh != nil {
 			select {
 			case _, ok := <-stopCh:
