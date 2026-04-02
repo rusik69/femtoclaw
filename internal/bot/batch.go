@@ -3,6 +3,7 @@ package bot
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"regexp"
 	"strconv"
 	"strings"
@@ -77,8 +78,9 @@ func (b *Bot) handleBatchWork(msg *tgbotapi.Message, count int) {
 
 	for i := 1; count == 0 || i <= count; i++ {
 		if i > 1 {
-			log.Printf("[batch] sleeping 10m between tasks")
-			time.Sleep(10 * time.Minute)
+			d := time.Duration(30+rand.Intn(31)) * time.Minute
+			log.Printf("[batch] sleeping %v between tasks", d)
+			time.Sleep(d)
 		}
 		if stopCh != nil {
 			select {
