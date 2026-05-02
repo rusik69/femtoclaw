@@ -14,6 +14,7 @@ FROM golang:1.25.5-alpine
 RUN apk add --no-cache \
 	bash \
 	ca-certificates \
+	chromium \
 	curl \
 	git \
 	github-cli \

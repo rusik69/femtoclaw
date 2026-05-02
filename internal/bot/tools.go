@@ -146,6 +146,52 @@ var openAITools = []openai.Tool{
 	{
 		Type: openai.ToolTypeFunction,
 		Function: &openai.FunctionDefinition{
+			Name: "browser",
+			Description: `Control a headless Chromium browser. One session until close or end of turn.
+Actions: navigate (url), screenshot, click (selector), type (selector+text), text (optional selector), html, eval (script), scroll (selector scrolls into view, or y for wheel delta), select (selector+value option text), wait (selector waits visible, else page stable), hover (selector), back, forward, cookies_get, cookies_set (cookies JSON), tab_new (optional url), tab_list, tab_switch (url substring), download (url triggers download), close.`,
+			Parameters: jsonschema.Definition{
+				Type: jsonschema.Object,
+				Properties: map[string]jsonschema.Definition{
+					"action": {
+						Type:        jsonschema.String,
+						Description: "navigate|screenshot|click|type|text|html|eval|scroll|select|wait|hover|back|forward|cookies_get|cookies_set|tab_new|tab_list|tab_switch|download|close",
+					},
+					"url": {
+						Type:        jsonschema.String,
+						Description: "URL: navigate, tab_new, tab_switch (substring match), download.",
+					},
+					"selector": {
+						Type:        jsonschema.String,
+						Description: "CSS selector: click, type, text, scroll (into view), select, wait, hover.",
+					},
+					"text": {
+						Type:        jsonschema.String,
+						Description: "Text for type action.",
+					},
+					"script": {
+						Type:        jsonschema.String,
+						Description: "JS expression for eval.",
+					},
+					"value": {
+						Type:        jsonschema.String,
+						Description: "Visible option text for select action.",
+					},
+					"y": {
+						Type:        jsonschema.Number,
+						Description: "Viewport scroll wheel delta (positive down) when scroll has no selector.",
+					},
+					"cookies": {
+						Type:        jsonschema.String,
+						Description: "JSON array for cookies_set: [{name,value,domain?,path?,url?,secure?,httpOnly?}].",
+					},
+				},
+				Required: []string{"action"},
+			},
+		},
+	},
+	{
+		Type: openai.ToolTypeFunction,
+		Function: &openai.FunctionDefinition{
 			Name:        "github_search_issues",
 			Description: "Search for GitHub issues. Always include '-linked:pr' in the query to exclude issues that already have a pull request.",
 			Parameters: jsonschema.Definition{
@@ -294,6 +340,13 @@ func (b *Bot) processMessage(msg *tgbotapi.Message) (string, error) {
 	ctx := context.Background()
 	chatID := msg.Chat.ID
 
+	var browserSess *tools.BrowserSession
+	defer func() {
+		if browserSess != nil {
+			browserSess.Close()
+		}
+	}()
+
 	githubUserInfo := ""
 	if b.cfg.GitHubUser != "" {
 		githubUserInfo = fmt.Sprintf("\nYour GitHub username is %s. When forking, push to your fork (https://github.com/%s/REPO) and use '%s:BRANCH' as the head in PRs.", b.cfg.GitHubUser, b.cfg.GitHubUser, b.cfg.GitHubUser)
@@ -313,6 +366,7 @@ The REQUIRED workflow for fixing any issue is, in this exact order:
 8. Report the PR URL and the linked issue number.
 
 Rules:
+- Use the browser tool (navigate, click, type, scroll, select, wait, hover, tabs, cookies, download, screenshot, html, eval) for web automation when needed.
 - Never clone the upstream repo; always clone your fork.
 - Never skip step 7 (github_create_pr). If push succeeds, PR creation must follow immediately.
 - When searching for issues, always include "-linked:pr" in the query.
@@ -472,6 +526,24 @@ Be careful with shell commands.`, b.cfg.WorkDir, githubUserInfo)
 						break
 					}
 					output, err = tools.Vibecode(path, cwd)
+				case "browser":
+					act, _ := args["action"].(string)
+					if strings.ToLower(strings.TrimSpace(act)) == "close" {
+						if browserSess == nil {
+							output = "No active browser session."
+						} else {
+							output, err = browserSess.Do(args)
+						}
+						break
+					}
+					if browserSess == nil {
+						browserSess, err = tools.NewBrowserSession()
+						if err != nil {
+							output = fmt.Sprintf("Error starting browser: %v", err)
+							break
+						}
+					}
+					output, err = browserSess.Do(args)
 				case "github_search_issues":
 					query, ok := args["query"].(string)
 					if !ok {
